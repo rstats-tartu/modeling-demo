@@ -47,6 +47,7 @@ apartments <- apartments %>%
   mutate(date = ymd(str_c(year, month, 1, sep = "-"))) %>% 
   select(date, everything())
 harju <- apartments %>% filter(str_detect(county, "Harju"))
+harju
 ```
 
 ## Strategy
@@ -66,23 +67,22 @@ harju <- apartments %>% filter(str_detect(county, "Harju"))
 
 Plot **number of transctions** per year for Harju county and add smooth line.
 ```{r}
-p <- ggplot(harju, aes(factor(year), transactions, group = 1)) +
+p <- ggplot(harju, aes(factor(year), transactions, group = area, color = area)) +
   geom_point() +
   geom_smooth(method = 'loess') +
   facet_wrap(~county, scales = "free_y") +
   labs(
     y = "Transactions",
     x = "Year"
-  )
+  ) +
+  scale_color_viridis(discrete = TRUE)
 p
 ```
 
 Mean price per unit area:
 ```{r}
 ## Add date 
-p <- harju %>% 
-  group_by(date, area) %>% 
-  summarise(price_unit_area_mean = mean(price_unit_area_mean, na.rm = TRUE)) %>% 
+p <- harju %>%
   ggplot(aes(date, price_unit_area_mean, group = area, color = area)) +
   geom_line() +
   geom_vline(xintercept = ymd("2008-09-15"), linetype = 2) +
@@ -95,6 +95,51 @@ p <- harju %>%
 p
 ```
 
+Adjust mean price to changes in consumer index:
+```{r}
+download.file("https://raw.githubusercontent.com/rstats-tartu/datasets/master/consumer_index.csv",
+              "data/consumer_index.csv")
+consumer_index <- read_csv("data/consumer_index.csv")
+consumer_index
+## check if 2005 is 100%
+consumer_index[10, 3:14] %>% rowMeans()
+divide_by_100 <- function(x) {
+  x/100
+  }
+consumer_index <- consumer_index %>% 
+  select(-X1) %>% 
+  gather(key = month, value = consumerindex, -year) %>% 
+  mutate_at("consumerindex", divide_by_100)
+consumer_index
+```
+
+Join apartments and consumer index data:
+```{r}
+apartments <- left_join(apartments, consumer_index, by = c("year", "month"))
+```
+
+Select harju county data:
+```{r}
+harju_ci <- filter(apartments, str_detect(county, "Harju"))
+harju_ci
+harju_ci <- harju_ci %>% 
+  mutate(pua_mean_ci = price_unit_area_mean / consumerindex)
+```
+
+
+Price per m^2 after consumer index adjustment:
+```{r}
+harju_ci %>%
+  ggplot(aes(date, pua_mean_ci, group = area, color = area)) +
+  geom_line() +
+  geom_vline(xintercept = ymd("2008-09-15"), linetype = 2) +
+  labs(title = "Transactions with residential apartments",
+       subtitle = "Harju county",
+       x = "Date",
+       y = "Consumer index corrected mean price\nrelative to 2005 (eur/m^2)",
+       caption = str_c("Source: Estonian Land Board, transactions database.\nDashed line, the collapse of the investment bank\nLehman Brothers on Sep 15, 2008.")) +
+  scale_color_viridis(discrete = TRUE, name = bquote(Apartment~size~m^2))
+```
 
 Seasonal pattern? Mean price eur/m^2 per month:
 ```{r}
@@ -103,17 +148,17 @@ harju_per_month <- harju %>%
   summarise_at(vars(transactions,
                     area_mean,
                     price_unit_area_mean), 
-               mean, na.rm = TRUE) 
-
+               mean, na.rm = TRUE)
+harju_per_month # factor(month, levels = month.abb)
 p <- harju_per_month %>%
-  ggplot(aes(factor(month, levels = month.abb), price_unit_area_mean, group = year)) +
+  ggplot(aes(factor(month, levels = month.abb), transactions, group = year)) +
   geom_line(alpha = 0.3) +
   geom_vline(xintercept = ymd("2008-09-15"), linetype = 2) +
   facet_wrap(~ area) +
   labs(title = "Transactions with residential apartments",
        subtitle = "Harju county",
        x = "Month",
-       y = bquote(Mean~price~(eur/m^2)),
+       y = "Transactions",
        caption = str_c("Source: Estonian Land Board, transactions database.\nDashed line, the collapse of the investment bank\nLehman Brothers on Sep 15, 2008.")) +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
 p
@@ -121,10 +166,12 @@ p
 
 Add trendline per month:
 ```{r}
+# install.packages("broom")
 library(broom)
 predicted_hpm <- harju_per_month %>% 
-  lm(price_unit_area_mean ~ month + area, data = .) %>% 
+  lm(transactions ~ month + area, data = .) %>% 
   fortify()
+predicted_hpm
 p + geom_line(data = predicted_hpm, aes(month, .fitted, group = 1), 
               color = "red", 
               size = 2)
