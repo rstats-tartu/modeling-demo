@@ -1,0 +1,162 @@
+---
+title: "Modelling"
+author: "Taavi Päll"
+date: "17 10 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Estonian Land Board data
+
+Available via [www.maaamet.ee](http://www.maaamet.ee/kinnisvara/htraru/FilterUI.aspx).
+API can be accessed programmatically using html requests.
+One can use "rvest" package. Please have a look at "R/maaamet.R" script in [rstats-tartu/datasets](https://www.github.com/rstats-tartu/datasets) repo.
+Returns html, but that ok too.
+Html results need little wrangling to get table.
+
+Data that can be downloaded are number of transactions and price summaries per property size, and type for different time periods.
+Price info is given for data splits with more than 5 transactions.
+
+## Load dataset
+
+```{r}
+##  Check if file is alredy downloaded 
+if(!file.exists("data/transactions_residential_apartments.csv")){
+  url <- "https://raw.githubusercontent.com/rstats-tartu/datasets/master/transactions_residential_apartments.csv"
+  
+  ## Check if data folder is present
+  if(!dir.exists("data")){
+    dir.create("data")
+  }
+  ## Download file to data folder
+  download.file(url, "data/transactions_residential_apartments.csv")
+}
+```
+
+## Import
+```{r}
+library(tidyverse)
+library(lubridate)
+library(stringr)
+library(viridis)
+apartments <- read_csv("data/transactions_residential_apartments.csv")
+apartments <- apartments %>% 
+  mutate(date = ymd(str_c(year, month, 1, sep = "-"))) %>% 
+  select(date, everything())
+harju <- apartments %>% filter(str_detect(county, "Harju"))
+```
+
+## Strategy
+
+- Start with single unit and identify interesting pattern
+
+- Summarise pattern with model
+
+- Apply model to all units
+
+- Look for units that don't fit pattern
+
+- Summarise with single model
+
+
+## First glimpse
+
+Plot **number of transctions** per year for Harju county and add smooth line.
+```{r}
+p <- ggplot(harju, aes(factor(year), transactions, group = 1)) +
+  geom_point() +
+  geom_smooth(method = 'loess') +
+  facet_wrap(~county, scales = "free_y") +
+  labs(
+    y = "Transactions",
+    x = "Year"
+  )
+p
+```
+
+Mean price per unit area:
+```{r}
+## Add date 
+p <- harju %>% 
+  group_by(date, area) %>% 
+  summarise(price_unit_area_mean = mean(price_unit_area_mean, na.rm = TRUE)) %>% 
+  ggplot(aes(date, price_unit_area_mean, group = area, color = area)) +
+  geom_line() +
+  geom_vline(xintercept = ymd("2008-09-15"), linetype = 2) +
+  labs(title = "Transactions with residential apartments",
+       subtitle = "Harju county",
+       x = "Date",
+       y = bquote(Mean~price~(eur/m^2)),
+       caption = str_c("Source: Estonian Land Board, transactions database.\nDashed line, the collapse of the investment bank\nLehman Brothers on Sep 15, 2008.")) +
+  scale_color_viridis(discrete = TRUE, name = bquote(Apartment~size~m^2))
+p
+```
+
+
+Seasonal pattern? Mean price eur/m^2 per month:
+```{r}
+harju_per_month <- harju %>% 
+  group_by(year, month, area) %>% 
+  summarise_at(vars(transactions,
+                    area_mean,
+                    price_unit_area_mean), 
+               mean, na.rm = TRUE) 
+
+p <- harju_per_month %>%
+  ggplot(aes(factor(month, levels = month.abb), price_unit_area_mean, group = year)) +
+  geom_line(alpha = 0.3) +
+  geom_vline(xintercept = ymd("2008-09-15"), linetype = 2) +
+  facet_wrap(~ area) +
+  labs(title = "Transactions with residential apartments",
+       subtitle = "Harju county",
+       x = "Month",
+       y = bquote(Mean~price~(eur/m^2)),
+       caption = str_c("Source: Estonian Land Board, transactions database.\nDashed line, the collapse of the investment bank\nLehman Brothers on Sep 15, 2008.")) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+p
+```
+
+Add trendline per month:
+```{r}
+library(broom)
+predicted_hpm <- harju_per_month %>% 
+  lm(price_unit_area_mean ~ month + area, data = .) %>% 
+  fortify()
+p + geom_line(data = predicted_hpm, aes(month, .fitted, group = 1), 
+              color = "red", 
+              size = 2)
+```
+Small trend at end of year?
+
+
+Number of transactions per month:
+```{r}
+p <- harju_per_month %>%
+  ggplot(aes(factor(month, levels = month.abb), transactions, group = year)) +
+  geom_line(alpha = 0.3) +
+  geom_vline(xintercept = ymd("2008-09-15"), linetype = 2) +
+  facet_wrap(~ area) +
+  labs(title = "Transactions with residential apartments",
+       subtitle = "Harju county",
+       x = "Month",
+       y = "Number of transcations",
+       caption = str_c("Source: Estonian Land Board, transactions database.\nDashed line, the collapse of the investment bank\nLehman Brothers on Sep 15, 2008.")) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+predicted_hpm <- harju_per_month %>% 
+  lm(transactions ~ month + area, data = .) %>% 
+  fortify()
+p + geom_line(data = predicted_hpm, aes(month, .fitted, group = 1), 
+              color = "red", 
+              size = 1)
+```
+
+Try to remove seasonal pattern and look then at the longer trend:
+```{r}
+
+```
+
+
+
