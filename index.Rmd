@@ -174,7 +174,8 @@ predicted_transa <- harju %>%
   augment() # broom
 predicted_transa %>% 
   arrange(desc(.cooksd)) %>% 
-  dplyr::select(.cooksd, everything())
+  dplyr::select(.cooksd, everything()) %>% 
+  head
 ```
 
 Overlay fitted values to previous plot.
@@ -192,7 +193,7 @@ Do we have similar effect to average price per m^2?
 predicted_pua <- harju %>% 
   lm(price_unit_area_mean ~ month + area, data = .) %>%
   augment()
-predicted_pua
+predicted_pua %>% head
 ```
 
 ```{r}
@@ -231,7 +232,8 @@ For some apartement size classes, few years may have large influence on average 
 ```{r}
 predicted_trans2 %>% 
   arrange(desc(.cooksd)) %>% 
-  dplyr::select(.cooksd, everything())
+  dplyr::select(.cooksd, everything()) %>% 
+  head()
 ```
 
 Same for mean price per m^2:
@@ -252,7 +254,8 @@ Seems ok!
 ```{r}
 predicted_pua2 %>%
   arrange(desc(.cooksd)) %>% 
-  dplyr::select(.cooksd, everything(.))
+  dplyr::select(.cooksd, everything(.)) %>% 
+  head()
 ```
 
 
@@ -353,7 +356,8 @@ Model coeficients and summary statistics can be returned as a data frame using `
 trans %>% 
   mutate(mod_tidy = map(mod_train, tidy)) %>% 
   dplyr::select(county, mod_tidy) %>% 
-  unnest
+  unnest %>% 
+  head()
 ```
 
 
@@ -376,6 +380,7 @@ trans_pred <- trans %>%
   dplyr::select(county, mod_pred) %>% 
   unnest
 trans_pred %>% 
-  dplyr::select(.fitted, transactions, everything())
+  dplyr::select(.fitted, transactions, everything()) %>% 
+  head()
 ```
 
