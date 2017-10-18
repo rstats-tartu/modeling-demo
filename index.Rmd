@@ -41,6 +41,10 @@ if(!file.exists("data/transactions_residential_apartments.csv")){
 library(tidyverse)
 library(lubridate)
 library(stringr)
+# Please try broom from GitHub as CRAN version may give obscure warning
+# with augment
+# devtools::install_github("dgrtwo/broom")
+library(broom)
 library(viridis)
 apartments <- read_csv("data/transactions_residential_apartments.csv")
 apartments <- apartments %>% 
@@ -65,7 +69,7 @@ harju
 
 ## First glimpse
 
-Plot **number of transctions** per year for Harju county and add smooth line.
+Plot **number of transactions** per year for Harju county and add smooth line.
 ```{r}
 p <- ggplot(harju, aes(factor(year), transactions, group = area, color = area)) +
   geom_point() +
@@ -141,69 +145,237 @@ harju_ci %>%
   scale_color_viridis(discrete = TRUE, name = bquote(Apartment~size~m^2))
 ```
 
-Seasonal pattern? Mean price eur/m^2 per month:
+## Seasonal pattern
+
+Seasonal pattern in number of transactions? Mean price eur/m^2 per month:
 ```{r}
-harju_per_month <- harju %>% 
-  group_by(year, month, area) %>% 
-  summarise_at(vars(transactions,
-                    area_mean,
-                    price_unit_area_mean), 
-               mean, na.rm = TRUE)
-harju_per_month # factor(month, levels = month.abb)
-p <- harju_per_month %>%
+## Note that we are rearranging x axis using R builtin vector of month names
+p <- harju %>%
   ggplot(aes(factor(month, levels = month.abb), transactions, group = year)) +
   geom_line(alpha = 0.3) +
   geom_vline(xintercept = ymd("2008-09-15"), linetype = 2) +
-  facet_wrap(~ area) +
-  labs(title = "Transactions with residential apartments",
+  facet_wrap(~ area, scales = "free_y") +
+  labs(title = "Seasonal trend in number of transactions\nwith residential apartments",
        subtitle = "Harju county",
        x = "Month",
        y = "Transactions",
-       caption = str_c("Source: Estonian Land Board, transactions database.\nDashed line, the collapse of the investment bank\nLehman Brothers on Sep 15, 2008.")) +
+       caption = "Source: Estonian Land Board, transactions database.") +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
 p
 ```
 
-Add trendline per month:
+Add trendline per month. 
+Fit linear model per month for each apartment size class.
+`augment()` function from "broom" library adds fitted values and residuals to the original data.
+We can use this to overlay model fit to our data.
 ```{r}
-# install.packages("broom")
-library(broom)
-predicted_hpm <- harju_per_month %>% 
-  lm(transactions ~ month + area, data = .) %>% 
-  fortify()
-predicted_hpm
-p + geom_line(data = predicted_hpm, aes(month, .fitted, group = 1), 
+predicted_transa <- harju %>% 
+  lm(transactions ~ month + area, data = .) %>%
+  augment() # broom
+predicted_transa %>% 
+  arrange(desc(.cooksd)) %>% 
+  dplyr::select(.cooksd, everything())
+```
+
+Overlay fitted values to previous plot.
+```{r}
+p + geom_line(data = predicted_transa, aes(month, .fitted, group = 1), 
+              color = "red",
+              size = 2) +
+  labs(caption = "Red line: model fit of seasonal effect to number of transactions.\nSource: Estonian Land Board, transactions database.")
+```
+The number of transactions increases during period from March to May?
+
+
+Do we have similar effect to average price per m^2?
+```{r}
+predicted_pua <- harju %>% 
+  lm(price_unit_area_mean ~ month + area, data = .) %>%
+  augment()
+predicted_pua
+```
+
+```{r}
+harju %>%
+  ggplot(aes(factor(month, levels = month.abb), price_unit_area_mean, group = year)) +
+  geom_line(alpha = 0.3) +
+  geom_vline(xintercept = ymd("2008-09-15"), linetype = 2) +
+  facet_wrap(~ area, scales = "free_y") +
+  labs(title = bquote(Seasonal~trend~price~per~m^2~of~residential~apartments),
+       subtitle = "Harju county",
+       x = "Month",
+       y = bquote(Mean~price~per~unit~area~(eur/m^2)),
+       caption = "Source: Estonian Land Board, transactions database.") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) +
+  geom_line(data = predicted_pua, aes(month, .fitted, group = 1), 
               color = "red", 
               size = 2)
 ```
-Small trend at end of year?
 
 
-Number of transactions per month:
+
+Residuals? Add also year to model to visualise residuals.
 ```{r}
-p <- harju_per_month %>%
-  ggplot(aes(factor(month, levels = month.abb), transactions, group = year)) +
-  geom_line(alpha = 0.3) +
-  geom_vline(xintercept = ymd("2008-09-15"), linetype = 2) +
+predicted_trans2 <- harju %>% 
+  lm(transactions ~ month + year + area, data = .) %>% 
+  augment
+predicted_trans2
+predicted_trans2 %>% 
+  ggplot(aes(factor(month, levels = month.abb), .resid, group = year)) + 
+  geom_hline(yintercept = 0, colour = "white", size = 3) +
+  geom_line() + 
+  facet_wrap(~ area)
+```
+
+For some apartement size classes, few years may have large influence on average number of transactions. We can look at the large cook's distance.
+```{r}
+predicted_trans2 %>% 
+  arrange(desc(.cooksd)) %>% 
+  dplyr::select(.cooksd, everything())
+```
+
+Same for mean price per m^2:
+```{r}
+predicted_pua2 <- harju %>% 
+  lm(price_unit_area_mean ~ month + year + area, data = .) %>% 
+  augment 
+predicted_pua2 %>% 
+  ggplot(aes(factor(month, levels = month.abb), .resid, group = year, color = factor(year))) + 
+  geom_hline(yintercept = 0, colour = "white", size = 3) +
+  geom_line() + 
   facet_wrap(~ area) +
-  labs(title = "Transactions with residential apartments",
-       subtitle = "Harju county",
-       x = "Month",
-       y = "Number of transcations",
-       caption = str_c("Source: Estonian Land Board, transactions database.\nDashed line, the collapse of the investment bank\nLehman Brothers on Sep 15, 2008.")) +
+  scale_color_viridis(discrete = TRUE) +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
-predicted_hpm <- harju_per_month %>% 
-  lm(transactions ~ month + area, data = .) %>% 
-  fortify()
-p + geom_line(data = predicted_hpm, aes(month, .fitted, group = 1), 
-              color = "red", 
-              size = 1)
 ```
 
-Try to remove seasonal pattern and look then at the longer trend:
+Seems ok! 
 ```{r}
-
+predicted_pua2 %>%
+  arrange(desc(.cooksd)) %>% 
+  dplyr::select(.cooksd, everything(.))
 ```
 
 
+
+Robust lm fit to number of transactions. Play with weights: price_min, price_unit_area_mean etc..
+```{r}
+# install.packages("MASS")
+library(MASS)
+predicted_transa_robust <- harju %>% 
+  rlm(transactions ~ month + area, data = ., weights = price_min) %>% 
+  augment
+```
+
+Add robust fit to plot:
+```{r}
+p + geom_line(data = predicted_transa, aes(month, .fitted, group = 1), 
+              color = "red",
+              size = 1) + 
+  geom_line(data = predicted_transa_robust, aes(month, .fitted, group = 1), 
+            color = "blue",
+            size = 1) +
+  labs(caption = "Red line: model fit of seasonal effect to number of transactions.\nBlue line: robust model fit of seasonal effect to number of transactions, weighted for minimal price. \nSource: Estonian Land Board, transactions database.")
+```
+## Whole dataset: all counties
+
+Plot whole dataset:
+```{r}
+apartments %>% 
+  ggplot(aes(date, transactions, group = area, color = area)) +
+  geom_line() +
+  facet_wrap(~ county, scales = "free_y")
+```
+
+
+```{r}
+apartments %>% 
+  mutate(price_unit_area_mean = price_unit_area_mean / consumerindex) %>% 
+  ggplot(aes(date, price_unit_area_mean, group = area, color = area)) +
+  geom_line() +
+  facet_wrap(~ county, scales = "free_y")
+```
+
+
+## Fit multiple models
+
+Fit model for each county. 
+Goodness of model fit is evaluated by its ability to predict response values.
+Response values can be predicted using the same data that was used to train model.
+In this case we are dealing with in-sample analysis, which is ok when all we want to know is model coeficients (eg. intercept and slope) to describe present data.
+In cases when we want to predict using some unseen future data, such models are usually overfitted, overly optimistic and don't perform very well.
+To manage overfitting, we split dataset into training set for model fitting and test set for model performance assessment.
+
+Resampling can be performed very well using base R function `sample()`.
+Let's say we want to use approx. 70% of rows from "mtcars" table to be used in model training and leave remaining 30% for model testing.
+Basically, all we need to do is to generate to non-overlapping row indexes.
+```{r}
+set.seed(123)
+index <- sample(1:nrow(mtcars), floor(0.7 * nrow(mtcars)), replace = FALSE)
+index
+## ~70% data goes to training set
+train <- mtcars[index, ]
+## remaining ~30% will be used for testing model performance
+test <- mtcars[-index, ]
+```
+
+Index based resampling is also implemented in tidyverse.
+We can use `resample_partition()` function from "modelr" library to perform.
+Here we generate data splits and move them to separate columns.
+```{r}
+library(modelr)
+## Generate data splits and move into separate columns
+trans <- apartments %>%
+  group_by(county) %>%
+  nest %>% 
+  mutate(parts = map(data, ~resample_partition(.x, c(test = 0.3, train = 0.7))),
+         test = map(parts, "test"),
+         train = map(parts, "train")) %>% 
+  dplyr::select(-parts)
+```
+
+Fit model to each data split. 
+Let's start with number of transactions.
+```{r}
+## Fit model
+trans <- trans %>%
+  mutate(mod_train = map(train, ~lm(transactions ~ month + area, data = .x)))
+## Print data with new model column
+trans %>% 
+  dplyr::select(mod_train, everything())
+```
+
+
+
+`coef()` and `summary()` return vector and S3 object respectively. 
+Model coeficients and summary statistics can be returned as a data frame using `tidy()` function from "broom" library:
+```{r}
+## model coeficients
+trans %>% 
+  mutate(mod_tidy = map(mod_train, tidy)) %>% 
+  dplyr::select(county, mod_tidy) %>% 
+  unnest
+```
+
+
+Pseudo out-of-sample model performance, `augment()` adds predictions to original data frame (.fitted).
+We subtract fitted values from the original values and calculate root-mean-squared deviation (rmsd).
+Smaller rmsd indicates better fit.
+```{r}
+trans <- trans %>%
+  mutate(mod_pred = map2(mod_train, test, ~augment(.x, newdata = .y)),
+         mod_pred = map(mod_pred, ~mutate(.x, .resid = transactions - .fitted)),
+         mod_rmsd = map_dbl(mod_pred, ~sqrt(mean(.x$`.resid`^2)))) 
+trans %>% 
+  dplyr::select(county, mod_rmsd) %>% 
+  arrange(desc(mod_rmsd))
+```
+We can see that Harju county displays worst fit and Tartu is next. These two counties show also majority of transactions. 
+
+```{r}
+trans_pred <- trans %>% 
+  dplyr::select(county, mod_pred) %>% 
+  unnest
+trans_pred %>% 
+  dplyr::select(.fitted, transactions, everything())
+```
 
