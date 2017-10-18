@@ -220,7 +220,8 @@ Residuals? Add also year to model to visualise residuals.
 predicted_trans2 <- harju %>% 
   lm(transactions ~ month + year + area, data = .) %>% 
   augment
-predicted_trans2
+predicted_trans2 %>% 
+  head()
 predicted_trans2 %>% 
   ggplot(aes(factor(month, levels = month.abb), .resid, group = year)) + 
   geom_hline(yintercept = 0, colour = "white", size = 3) +
